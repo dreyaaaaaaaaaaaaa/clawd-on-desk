@@ -103,14 +103,21 @@ function createCompanionPetManager(deps = {}) {
 
   // ── Theme loading ──
   function loadCompanionTheme(themeId) {
+    console.log(`[THEME] Loading theme: ${themeId}`);
     const variantMap = settingsController.get("themeVariant") || {};
     const overrideMap = settingsController.get("themeOverrides") || {};
-    const theme = themeLoader.loadTheme(themeId, {
-      strict: true,
-      variant: variantMap[themeId] || "default",
-      overrides: overrideMap[themeId] || null,
-    });
-    return { theme, context: themeLoader.createThemeContext(theme) };
+    try {
+      const theme = themeLoader.loadTheme(themeId, {
+        strict: true,
+        variant: variantMap[themeId] || "default",
+        overrides: overrideMap[themeId] || null,
+      });
+      console.log(`[THEME] Loaded successfully: ${themeId}`);
+      return { theme, context: themeLoader.createThemeContext(theme) };
+    } catch (err) {
+      console.log(`[THEME] Failed to load ${themeId}:`, err && err.message);
+      throw err;
+    }
   }
 
   function isOneshotDisabledForTheme(themeId, stateKey) {
