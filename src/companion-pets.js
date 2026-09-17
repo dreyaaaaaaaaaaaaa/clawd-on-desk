@@ -850,6 +850,7 @@ function createCompanionPetManager(deps = {}) {
     const wasEnabled = enabled;
     enabled = prefs.enabled;
     const wanted = enabled ? prefs.pets : {};
+    console.log(`[SYNC] enabled=${enabled}, wanted=`, wanted, `current companions:`, [...companions.keys()]);
 
     // Dispose companions that are gone or re-themed.
     for (const [agentId, companion] of [...companions]) {
