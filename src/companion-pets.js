@@ -86,6 +86,7 @@ function createCompanionPetManager(deps = {}) {
   const logWarn = deps.logWarn || ((...args) => console.warn(...args));
   const openSettings = deps.openSettings || noop;
   const focusAgentSessions = deps.focusAgentSessions || noop;
+  const revealSessionHud = deps.revealSessionHud || noop;
   const resolveAgentDisplayName = deps.resolveAgentDisplayName || ((id) => id);
   const getCursorScreenPoint = deps.getCursorScreenPoint
     || (() => (screen ? screen.getCursorScreenPoint() : { x: 0, y: 0 }));
@@ -103,21 +104,14 @@ function createCompanionPetManager(deps = {}) {
 
   // ── Theme loading ──
   function loadCompanionTheme(themeId) {
-    console.log(`[THEME] Loading theme: ${themeId}`);
     const variantMap = settingsController.get("themeVariant") || {};
     const overrideMap = settingsController.get("themeOverrides") || {};
-    try {
-      const theme = themeLoader.loadTheme(themeId, {
-        strict: true,
-        variant: variantMap[themeId] || "default",
-        overrides: overrideMap[themeId] || null,
-      });
-      console.log(`[THEME] Loaded successfully: ${themeId}`);
-      return { theme, context: themeLoader.createThemeContext(theme) };
-    } catch (err) {
-      console.log(`[THEME] Failed to load ${themeId}:`, err && err.message);
-      throw err;
-    }
+    const theme = themeLoader.loadTheme(themeId, {
+      strict: true,
+      variant: variantMap[themeId] || "default",
+      overrides: overrideMap[themeId] || null,
+    });
+    return { theme, context: themeLoader.createThemeContext(theme) };
   }
 
   function isOneshotDisabledForTheme(themeId, stateKey) {
@@ -187,7 +181,6 @@ function createCompanionPetManager(deps = {}) {
 
   // ── Companion factory ──
   function createCompanion(agentId, themeId, index) {
-    debugLog(`[COMPANION] Creating companion for agent=${agentId} theme=${themeId}`);
     let loaded;
     try {
       loaded = loadCompanionTheme(themeId);
@@ -531,7 +524,6 @@ function createCompanionPetManager(deps = {}) {
       },
     });
     companion.hitWin = hitWin;
-    debugLog(`[COMPANION] Hit window created for ${agentId}`);
     hitWin.setShape([{ x: 0, y: 0, width: 8, height: 8 }]);
     hitWin.setIgnoreMouseEvents(false);
     if (isMac) hitWin.setFocusable(false);
@@ -723,10 +715,11 @@ function createCompanionPetManager(deps = {}) {
     });
     on("pet-visual-settled", (_event, payload) => { companion.projection.settle(payload); });
     on("pet-visual-ready", () => { syncHitWin(); });
-    on("focus-terminal", () => {
-      debugLog(`companion-pet ${agentId} focus-terminal clicked`);
-      focusAgentSessions(agentId);
-    });
+    // A plain click on the pet body reveals the Session HUD (same gesture as
+    // the main pet: hit-renderer sends reveal-session-hud, not focus-terminal).
+    // Ctrl/Cmd-click sends "show-dashboard", which session-ipc serves ungated.
+    on("pet-interaction:reveal-session-hud", () => { revealSessionHud(); });
+    on("focus-terminal", () => { focusAgentSessions(agentId); });
     on("show-context-menu", () => { showContextMenu(); });
     // Consumed so the primary's gate never sees them; companions have no mini
     // mode / low-power mode / accessories.
@@ -857,7 +850,6 @@ function createCompanionPetManager(deps = {}) {
     const wasEnabled = enabled;
     enabled = prefs.enabled;
     const wanted = enabled ? prefs.pets : {};
-    console.log(`[SYNC] enabled=${enabled}, wanted=`, wanted, `current companions:`, [...companions.keys()]);
 
     // Dispose companions that are gone or re-themed.
     for (const [agentId, companion] of [...companions]) {

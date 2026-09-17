@@ -327,3 +327,91 @@ describe("multi-pet: pet interaction IPC sender gate", () => {
     assert.deepStrictEqual(calls, ["drag-move"]);
   });
 });
+
+describe("multi-pet: companion pet body click", () => {
+  const { createCompanionPetManager } = require("../src/companion-pets");
+
+  class FakeWebContents {
+    constructor() { this.handlers = {}; }
+    on(event, cb) { this.handlers[event] = cb; }
+    send() {}
+    reload() {}
+    isDestroyed() { return false; }
+    get mainFrame() { return this; }
+  }
+  class FakeWindow {
+    constructor(opts) {
+      this.webContents = new FakeWebContents();
+      this.bounds = { x: opts.x || 0, y: opts.y || 0, width: opts.width || 8, height: opts.height || 8 };
+    }
+    on() {}
+    setFocusable() {}
+    setIgnoreMouseEvents() {}
+    setAlwaysOnTop() {}
+    setShape() {}
+    setSkipTaskbar() {}
+    loadFile() {}
+    isDestroyed() { return false; }
+    getBounds() { return this.bounds; }
+    setBounds(b) { Object.assign(this.bounds, b); }
+    isVisible() { return false; }
+    showInactive() {}
+    hide() {}
+    close() {}
+    destroy() {}
+    getNativeWindowHandle() { return Buffer.alloc(8); }
+  }
+
+  function makeManager(overrides = {}) {
+    themeLoader.init(path.join(__dirname, "..", "src"), null);
+    const store = {
+      multiPet: { enabled: true, pets: { codex: "cloudling" }, positions: {} },
+      size: "medium", themeVariant: {}, themeOverrides: {}, soundMuted: true, soundVolume: 1,
+    };
+    const listeners = new Map();
+    const ipcMain = {
+      on: (channel, cb) => { listeners.set(channel, [...(listeners.get(channel) || []), cb]); },
+      removeListener: () => {},
+    };
+    const manager = createCompanionPetManager({
+      BrowserWindow: FakeWindow,
+      ipcMain,
+      screen: { on() {}, removeListener() {}, getCursorScreenPoint: () => ({ x: 0, y: 0 }) },
+      isWin: false,
+      themeLoader,
+      settingsController: { get: (k) => store[k], subscribeKey: () => () => {}, applyUpdate: () => {} },
+      getPrimarySessions: () => new Map(),
+      getCurrentPixelSize: () => ({ width: 200, height: 200 }),
+      getPrimaryWorkAreaSafe: () => ({ x: 0, y: 0, width: 1920, height: 1080 }),
+      getPrimaryPetBounds: () => ({ x: 1500, y: 800, width: 200, height: 200 }),
+      preloadPath: "p", hitPreloadPath: "h", indexHtmlPath: "i", hitHtmlPath: "hh",
+      ...overrides,
+    });
+    manager.start();
+    const companion = manager._companions.get("codex");
+    const emit = (channel, sender) => {
+      for (const cb of listeners.get(channel) || []) cb({ sender, senderFrame: sender });
+    };
+    return { manager, companion, emit };
+  }
+
+  it("creates the Codex companion from prefs", () => {
+    const { companion } = makeManager();
+    assert.ok(companion, "companion for codex should exist");
+    assert.equal(companion.themeId, "cloudling");
+  });
+
+  it("reveals the Session HUD on a plain click from the companion's own hit window", () => {
+    const revealSessionHud = mock.fn();
+    const { companion, emit } = makeManager({ revealSessionHud });
+    emit("pet-interaction:reveal-session-hud", companion.hitWin.webContents);
+    assert.equal(revealSessionHud.mock.callCount(), 1);
+  });
+
+  it("ignores reveal-session-hud from a window it does not own", () => {
+    const revealSessionHud = mock.fn();
+    const { emit } = makeManager({ revealSessionHud });
+    emit("pet-interaction:reveal-session-hud", new FakeWebContents());
+    assert.equal(revealSessionHud.mock.callCount(), 0);
+  });
+});
