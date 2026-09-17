@@ -5096,8 +5096,8 @@ function createWindow() {
     logWarn: (...args) => console.warn(...args),
     openSettings: (options) => settingsWindowRuntime.open(options),
     focusAgentSessions: (agentId) => focusCompanionAgentSessions(agentId),
-    revealSessionHud: () => {
-      if (_sessionHud && typeof _sessionHud.revealFromPet === "function") _sessionHud.revealFromPet();
+    revealSessionHud: (anchor) => {
+      if (_sessionHud && typeof _sessionHud.revealFromPet === "function") _sessionHud.revealFromPet(anchor);
     },
     resolveAgentDisplayName: _resolveAgentDisplayName,
     getCursorScreenPoint: () => screen.getCursorScreenPoint(),

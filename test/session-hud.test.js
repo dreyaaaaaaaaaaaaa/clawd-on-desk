@@ -585,7 +585,7 @@ describe("session HUD v5 three-state runtime contracts (source-level)", () => {
 
   it("revealFromPet seeds visibleHoldUntil with HIDE_GRACE_MS (HIGH 3 fix)", () => {
     // Inside revealFromPet, after setting clickRevealed, must seed hold.
-    const revealFn = src.match(/function revealFromPet\(\)\s*\{[\s\S]*?\n  \}/);
+    const revealFn = src.match(/function revealFromPet\([^)]*\)\s*\{[\s\S]*?\n  \}/);
     assert.ok(revealFn, "revealFromPet function missing");
     assert.ok(
       /visibleHoldUntil\s*=\s*Date\.now\(\)\s*\+\s*HIDE_GRACE_MS/.test(revealFn[0]),
@@ -595,6 +595,17 @@ describe("session HUD v5 three-state runtime contracts (source-level)", () => {
       /clickRevealed\s*=\s*true/.test(revealFn[0]),
       "revealFromPet must set clickRevealed=true"
     );
+  });
+
+  it("revealFromPet(anchor) anchors geometry + hot zone to the clicked companion pet (multi-pet)", () => {
+    // Every pet-bounds read goes through the anchor helpers so a companion
+    // reveal positions the HUD (and its auto-hide hot zone) beside that pet.
+    assert.ok(/function revealFromPet\(anchor = null\)/.test(src));
+    assert.equal((src.match(/const petBounds = anchorPetBounds\(\)/g) || []).length, 3, "3 geometry sites use anchorPetBounds()");
+    assert.ok(!/const petBounds = typeof ctx\.getPetWindowBounds/.test(src), "no direct ctx.getPetWindowBounds geometry read left");
+    // Ending the revealed state must drop the anchor so the main pet is the default again.
+    const clearSites = src.match(/clickRevealed = false;\n\s*revealAnchor = null;/g) || [];
+    assert.ok(clearSites.length >= 4, `revealAnchor reset next to clickRevealed=false (got ${clearSites.length})`);
   });
 
   it("handlePinnedChanged(false) reads real hudWindow.isVisible(), NOT shouldShow() (HIGH 2 fix)", () => {

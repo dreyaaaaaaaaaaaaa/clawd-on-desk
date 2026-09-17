@@ -322,6 +322,32 @@ module.exports = function initSessionHud(ctx) {
   let lastHudHeight = HUD_ROW_HEIGHT;
   let pollTimer = null;
   let clickRevealed = false;
+  // Multi-pet: while click-revealed from a companion pet, the HUD anchors to
+  // that pet (position + auto-hide hot zone) instead of the main pet. Cleared
+  // whenever the revealed state ends, so pinned / main-pet reveals are untouched.
+  let revealAnchor = null;
+
+  function anchorPetBounds() {
+    if (revealAnchor) {
+      try {
+        const bounds = revealAnchor.getPetWindowBounds();
+        if (bounds) return bounds;
+      } catch {}
+    }
+    return typeof ctx.getPetWindowBounds === "function" ? ctx.getPetWindowBounds() : null;
+  }
+  function anchorHitRect(petBounds) {
+    const fn = revealAnchor && typeof revealAnchor.getHitRectScreen === "function"
+      ? revealAnchor.getHitRectScreen
+      : ctx.getHitRectScreen;
+    return typeof fn === "function" ? fn(petBounds) : null;
+  }
+  function anchorAnchorRect(petBounds) {
+    const fn = revealAnchor && typeof revealAnchor.getSessionHudAnchorRect === "function"
+      ? revealAnchor.getSessionHudAnchorRect
+      : ctx.getSessionHudAnchorRect;
+    return typeof fn === "function" ? fn(petBounds) : null;
+  }
   let visibleHoldUntil = 0;
 
   function getCurrentSnapshot() {
@@ -389,14 +415,10 @@ module.exports = function initSessionHud(ctx) {
 
   function computeExpectedHudContentBounds(snapshot, scale = getTextScale()) {
     if (!ctx.win || ctx.win.isDestroyed()) return null;
-    const petBounds = typeof ctx.getPetWindowBounds === "function" ? ctx.getPetWindowBounds() : null;
+    const petBounds = anchorPetBounds();
     if (!petBounds) return null;
-    const hitRect = typeof ctx.getHitRectScreen === "function"
-      ? ctx.getHitRectScreen(petBounds)
-      : null;
-    const anchorRect = typeof ctx.getSessionHudAnchorRect === "function"
-      ? ctx.getSessionHudAnchorRect(petBounds)
-      : null;
+    const hitRect = anchorHitRect(petBounds);
+    const anchorRect = anchorAnchorRect(petBounds);
     const cx = petBounds.x + petBounds.width / 2;
     const cy = petBounds.y + petBounds.height / 2;
     const workArea = typeof ctx.getNearestWorkArea === "function"
@@ -481,6 +503,7 @@ module.exports = function initSessionHud(ctx) {
     const wasRevealed = clickRevealed;
     if (wasRevealed && !result.show && ctx.sessionHudPinned !== true) {
       clickRevealed = false;
+      revealAnchor = null;
       visibleHoldUntil = 0;
       if (syncOnChange) {
         syncSessionHud(latestSnapshot, { sendSnapshot: false });
@@ -517,6 +540,7 @@ module.exports = function initSessionHud(ctx) {
       pollTimer = null;
     }
     clickRevealed = false;
+    revealAnchor = null;
     visibleHoldUntil = 0;
   }
 
@@ -554,6 +578,7 @@ module.exports = function initSessionHud(ctx) {
   // Internal: clear revealed state without syncing. Caller decides next sync.
   function clearReveal() {
     clickRevealed = false;
+    revealAnchor = null;
     visibleHoldUntil = 0;
     if (pollTimer) {
       clearTimeout(pollTimer);
@@ -561,17 +586,25 @@ module.exports = function initSessionHud(ctx) {
     }
   }
 
-  // Public API: user clicked the pet to reveal HUD.
-  function revealFromPet() {
+  // Public API: user clicked the pet to reveal HUD. `anchor` (optional) is a
+  // companion pet's { getPetWindowBounds, getHitRectScreen,
+  // getSessionHudAnchorRect }: the HUD then sits beside that pet and its
+  // hot zone follows it; omitted = main pet.
+  function revealFromPet(anchor = null) {
     // Quota can expire while both overlay windows are hidden and no session
     // event arrives. Re-read before deciding eligibility so a stale cached
     // snapshot cannot resurrect a dead Orbit coin.
     latestSnapshot = getCurrentSnapshot();
     if (!baseEligible(latestSnapshot)) return;
     if (ctx.sessionHudPinned === true) return;     // pinned already always-show
+    const nextAnchor = anchor && typeof anchor.getPetWindowBounds === "function" ? anchor : null;
+    const anchorChanged = nextAnchor !== revealAnchor;
+    revealAnchor = nextAnchor;
     if (clickRevealed) {
-      // Already revealed — refresh grace as a click tolerance.
+      // Already revealed — refresh grace as a click tolerance; a click on a
+      // different pet moves the HUD over to it.
       visibleHoldUntil = Date.now() + HIDE_GRACE_MS;
+      if (anchorChanged) syncSessionHud(latestSnapshot);
       return;
     }
     clickRevealed = true;
@@ -587,6 +620,7 @@ module.exports = function initSessionHud(ctx) {
       stopAutoHidePoll();
       // Pinned now — HUD always shows via shouldShow. Clear any stale reveal.
       clickRevealed = false;
+      revealAnchor = null;
       visibleHoldUntil = 0;
       syncSessionHud(latestSnapshot);
       return;
@@ -756,10 +790,10 @@ module.exports = function initSessionHud(ctx) {
     if (!ctx.win || ctx.win.isDestroyed()) return null;
     const coinCount = countQuotaCoins(snapshot, ctx.sessionHudShowQuota !== false, ctx.quotaRingHiddenProviders);
     if (coinCount <= 0) return null;
-    const petBounds = typeof ctx.getPetWindowBounds === "function" ? ctx.getPetWindowBounds() : null;
+    const petBounds = anchorPetBounds();
     if (!petBounds) return null;
-    const hitRect = typeof ctx.getHitRectScreen === "function" ? ctx.getHitRectScreen(petBounds) : null;
-    const anchorRect = typeof ctx.getSessionHudAnchorRect === "function" ? ctx.getSessionHudAnchorRect(petBounds) : null;
+    const hitRect = anchorHitRect(petBounds);
+    const anchorRect = anchorAnchorRect(petBounds);
     const cx = petBounds.x + petBounds.width / 2;
     const cy = petBounds.y + petBounds.height / 2;
     const workArea = typeof ctx.getNearestWorkArea === "function"
@@ -849,14 +883,10 @@ module.exports = function initSessionHud(ctx) {
 
   function computeBounds(snapshot, scale = getTextScale()) {
     if (!ctx.win || ctx.win.isDestroyed()) return null;
-    const petBounds = typeof ctx.getPetWindowBounds === "function" ? ctx.getPetWindowBounds() : null;
+    const petBounds = anchorPetBounds();
     if (!petBounds) return null;
-    const hitRect = typeof ctx.getHitRectScreen === "function"
-      ? ctx.getHitRectScreen(petBounds)
-      : null;
-    const anchorRect = typeof ctx.getSessionHudAnchorRect === "function"
-      ? ctx.getSessionHudAnchorRect(petBounds)
-      : null;
+    const hitRect = anchorHitRect(petBounds);
+    const anchorRect = anchorAnchorRect(petBounds);
     const cx = petBounds.x + petBounds.width / 2;
     const cy = petBounds.y + petBounds.height / 2;
     const workArea = typeof ctx.getNearestWorkArea === "function"

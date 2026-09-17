@@ -605,6 +605,13 @@ function createCompanionPetManager(deps = {}) {
     }
     companion.showWindows = showWindows;
     companion.hideWindows = hideWindows;
+    // Session HUD anchor: the shared HUD positions itself beside this pet (and
+    // keeps its auto-hide hot zone here) while revealed from a click on it.
+    companion.hudAnchor = {
+      getPetWindowBounds,
+      getHitRectScreen: (bounds) => companion.geometry.getHitRectScreen(bounds),
+      getSessionHudAnchorRect: (bounds) => companion.geometry.getSessionHudAnchorRect(bounds),
+    };
 
     // ── Drag / reactions / clicks (IPC from this companion's windows only) ──
     function isOwnSender(event) {
@@ -718,7 +725,7 @@ function createCompanionPetManager(deps = {}) {
     // A plain click on the pet body reveals the Session HUD (same gesture as
     // the main pet: hit-renderer sends reveal-session-hud, not focus-terminal).
     // Ctrl/Cmd-click sends "show-dashboard", which session-ipc serves ungated.
-    on("pet-interaction:reveal-session-hud", () => { revealSessionHud(); });
+    on("pet-interaction:reveal-session-hud", () => { revealSessionHud(companion.hudAnchor); });
     on("focus-terminal", () => { focusAgentSessions(agentId); });
     on("show-context-menu", () => { showContextMenu(); });
     // Consumed so the primary's gate never sees them; companions have no mini

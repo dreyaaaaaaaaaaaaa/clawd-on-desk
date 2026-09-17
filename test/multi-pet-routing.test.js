@@ -401,11 +401,17 @@ describe("multi-pet: companion pet body click", () => {
     assert.equal(companion.themeId, "cloudling");
   });
 
-  it("reveals the Session HUD on a plain click from the companion's own hit window", () => {
+  it("reveals the Session HUD anchored to the companion on a plain click from its own hit window", () => {
     const revealSessionHud = mock.fn();
     const { companion, emit } = makeManager({ revealSessionHud });
     emit("pet-interaction:reveal-session-hud", companion.hitWin.webContents);
     assert.equal(revealSessionHud.mock.callCount(), 1);
+    const anchor = revealSessionHud.mock.calls[0].arguments[0];
+    assert.ok(anchor && typeof anchor.getPetWindowBounds === "function");
+    assert.ok(typeof anchor.getHitRectScreen === "function");
+    assert.ok(typeof anchor.getSessionHudAnchorRect === "function");
+    // The anchor reports the companion's own window, not the main pet's.
+    assert.deepEqual(anchor.getPetWindowBounds(), companion.win.getBounds());
   });
 
   it("ignores reveal-session-hud from a window it does not own", () => {
