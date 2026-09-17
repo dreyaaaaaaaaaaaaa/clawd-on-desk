@@ -120,6 +120,7 @@ Copilot CLI 同步走 `<COPILOT_HOME 或 ~/.copilot>/hooks/hooks.json`，marker-
 | `src/renderer.js` | 动画切换、SVG 预加载、眼球追踪渲染 |
 | `src/permission.js` + `src/permission-automation-policy.js` + `src/session-automation-coordinator.js` | 权限气泡、自动化策略、per-session 授权与决策回包；远程 client 由 `main.js` 注入 |
 | `src/pet-window-runtime.js` + `src/floating-window-runtime.js` + `src/topmost-runtime.js` | 双窗口 owner、浮层重排、z-order / fullscreen / focusability |
+| `src/companion-pets.js` | Multi Pet：按 `prefs.multiPet.pets` 为每个 agent 创建独立 companion 桌宠（自有 theme / state / tick / projection / 窗口），共享主 `state.js` 的 sessions；主桌宠通过 `getDisplayAgentFilter` 排除 companion agent |
 | `src/update-bubble.js` | 更新气泡创建、测高、跟随桌宠定位，避让 HUD / permission stack |
 | `src/dashboard.js` + `src/dashboard-renderer.js` | Sessions Dashboard 唯一 owner：会话列表、别名编辑、终端跳转、几何持久化，以及同一页面的临时键盘模式 |
 | `src/dashboard-host.js` | Dashboard 普通宿主的平台封装：darwin/win32 用 `BaseWindow + WebContentsView`（无 `ready-to-show`），Linux 保留 `BrowserWindow` |

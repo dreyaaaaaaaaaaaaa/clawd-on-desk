@@ -488,6 +488,15 @@ const SCHEMA = {
   // filenames validated against the LOADED theme at resolve time
   // (idle-visual.js), never here, so a theme update that drops the file
   // degrades gracefully to the theme default.
+  // Multi-pet mode: one desktop pet per agent. The main pet (`theme`) shows
+  // every agent that has no dedicated pet; `pets` maps agentId -> themeId for
+  // agents that get their own companion pet, `positions` remembers where each
+  // companion was dropped. Missing pets entry = handled by the main pet.
+  multiPet: {
+    type: "object",
+    defaultFactory: () => defaultMultiPet(),
+    normalize: normalizeMultiPet,
+  },
   idleVisual: {
     type: "object",
     defaultFactory: () => ({}),
@@ -1350,6 +1359,34 @@ function normalizeThemeOverrides(value, defaultsValue) {
 
     if (Object.keys(cleanThemeMap).length > 0) {
       out[themeId] = cleanThemeMap;
+    }
+  }
+  return out;
+}
+
+const MULTI_PET_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
+function defaultMultiPet() {
+  return { enabled: false, pets: { codex: "cloudling" }, positions: {} };
+}
+
+function normalizeMultiPet(value, defaultsValue) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return defaultsValue;
+  const out = defaultMultiPet();
+  out.enabled = value.enabled === true;
+  if (value.pets && typeof value.pets === "object" && !Array.isArray(value.pets)) {
+    out.pets = {};
+    for (const [agentId, themeId] of Object.entries(value.pets)) {
+      if (!MULTI_PET_ID_RE.test(agentId)) continue;
+      if (typeof themeId !== "string" || !MULTI_PET_ID_RE.test(themeId)) continue;
+      out.pets[agentId] = themeId;
+    }
+  }
+  if (value.positions && typeof value.positions === "object" && !Array.isArray(value.positions)) {
+    for (const [agentId, pos] of Object.entries(value.positions)) {
+      if (!MULTI_PET_ID_RE.test(agentId)) continue;
+      if (!pos || typeof pos !== "object" || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) continue;
+      out.positions[agentId] = { x: Math.round(pos.x), y: Math.round(pos.y) };
     }
   }
   return out;

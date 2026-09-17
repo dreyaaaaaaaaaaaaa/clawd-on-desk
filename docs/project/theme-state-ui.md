@@ -28,6 +28,17 @@ Windows 的 hit window 在原生 activation controller 可用时按前台全屏�
 - working 子动画：Clawd 主题为 1 个会话 → typing，2 个 → headphones groove，3+ → building；Calico / Cloudling 仍为 typing / juggling / building
 - juggling 子动画：1 个 subagent → juggling，2+ → conducting
 
+## Multi Pet
+
+`prefs.multiPet = { enabled, pets: { [agentId]: themeId }, positions }` 让每个 agent 拥有独立桌宠（默认 `pets.codex = "cloudling"`，关闭时行为与单桌宠完全一致）。
+
+- 主桌宠（`prefs.theme`，`src/main.js` 的 `petWindowRuntime` / `_state` / `_tick`）负责所有**没有**专属桌宠的 agent；`src/companion-pets.js` 为 `pets` 中的每个 agent 创建一个 companion：独立的 theme context、`state.js` 实例（仅做呈现：min-display / auto-return / 睡眠 / 音效）、`displayed-visual-projection`、`tick.js`、渲染窗口 + 输入窗口，以及自己的音效冷却
+- 会话真相仍只有主 `state.js` 的 `sessions` Map：companion 通过 `ctx.getExternalSessions()` + `ctx.getDisplayAgentFilter()` 读取过滤视图（`getDisplaySessions()`），主桌宠用同一机制排除 companion agent
+- 一次性视觉（attention / error / notification / sweeping / carrying）无法从 Map 推导：`updateSession` / `promoteCompletion` 用 `activeEventAgentId` 标记事件归属，`setState` 通过 `routeForeignOneshot` 把外来 agent 的 one-shot 交给 `ctx.onForeignOneshotState`，自己只重新 settle；`emitSessionSnapshot` 触发 `ctx.onSessionsChanged` 让 companion 重新解析
+- `pet-interaction-ipc.js` 的 `isOwnedSender` 门：companion 复用同一套 preload / channel，主桌宠只接受自己窗口发来的 drag / reaction IPC，companion 在 `companion-pets.js` 内注册自己的 sender-gated listener
+- companion 不参与 mini mode、free roam、HUD / 气泡锚定、配饰 / tint、viewport 虚拟化；位置写入 `multiPet.positions[agentId]`，默认排在主桌宠旁边；隐藏 / DND / size / themeOverrides 变更由 main.js 转发
+- Settings → Theme 的「Multi Pet」区块暴露开关与每个已启用 agent 的下拉（"Main pet" 或某个主题）
+
 ## Theme System
 
 Clawd 是主题化桌宠：动画资源、计时、hitbox、眼球追踪参数都来自主题配置。

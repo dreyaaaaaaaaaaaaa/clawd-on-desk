@@ -108,6 +108,57 @@ let DISPLAY_HINT_MAP = {};
 
 // ── Session tracking ──
 const sessions = new Map();
+
+// ── Multi-pet display routing ──
+// One state runtime owns the session bookkeeping (this Map, snapshots, recap,
+// permissions). In multi-pet mode every pet still has its own state runtime
+// for presentation (min-display / auto-return / sleep / sounds), but the
+// display decision is made over a *view* of the shared sessions:
+//   · ctx.getExternalSessions()   — companion pets read the primary's Map
+//   · ctx.getDisplayAgentFilter() — (agentId) => boolean; which agents this pet
+//                                   shows. null/undefined = every agent.
+// One-shot visuals (attention/error/notification/sweeping/carrying) are not
+// derivable from the Map, so updateSession tags the agent it is processing
+// and setState hands foreign one-shots to ctx.onForeignOneshotState instead
+// of playing them on this pet.
+let activeEventAgentId = null;
+
+function getDisplayAgentFilter() {
+  return typeof ctx.getDisplayAgentFilter === "function" ? ctx.getDisplayAgentFilter() : null;
+}
+
+function getDisplaySessions() {
+  const external = typeof ctx.getExternalSessions === "function" ? ctx.getExternalSessions() : null;
+  const source = external instanceof Map ? external : sessions;
+  const filter = getDisplayAgentFilter();
+  if (typeof filter !== "function") return source;
+  const view = new Map();
+  for (const [id, session] of source) {
+    if (session && filter(session.agentId || null)) view.set(id, session);
+  }
+  return view;
+}
+
+function withEventAgent(agentId, fn) {
+  const previous = activeEventAgentId;
+  activeEventAgentId = typeof agentId === "string" && agentId ? agentId : null;
+  try {
+    return fn();
+  } finally {
+    activeEventAgentId = previous;
+  }
+}
+
+// Returns true when the one-shot belongs to another pet (and was handed to it).
+function routeForeignOneshot(state, svgOverride, options) {
+  if (!activeEventAgentId) return false;
+  const filter = getDisplayAgentFilter();
+  if (typeof filter !== "function" || filter(activeEventAgentId)) return false;
+  if (typeof ctx.onForeignOneshotState === "function") {
+    try { ctx.onForeignOneshotState(activeEventAgentId, state, svgOverride, options); } catch {}
+  }
+  return true;
+}
 // Account-wide rate-limit quota, keyed by reporting source — deliberately
 // NOT session state (see src/state-account-quota.js). Persistence is
 // opt-in via ctx so the many test-constructed state runtimes stay
@@ -572,6 +623,17 @@ function clearPendingStateTimer() {
 function setState(newState, svgOverride, options = {}) {
   if (shouldDropForDnd()) return;
 
+  // Multi-pet: a one-shot raised while processing another pet's agent is
+  // played by that pet. This pet just re-settles on its own resolved state
+  // (with the event tag cleared so the re-resolve can never route again).
+  if (ONESHOT_STATES.has(newState) && routeForeignOneshot(newState, svgOverride, options)) {
+    withEventAgent(null, () => {
+      const resolved = resolveDisplayState();
+      setState(resolved, getSvgOverride(resolved));
+    });
+    return;
+  }
+
   if (newState === "yawning" && SLEEP_SEQUENCE.has(currentState)) return;
 
   const sameState = newState === currentState;
@@ -684,7 +746,7 @@ function resolveSoundOptionsForState(state) {
   const logicalState = state === "mini-alert" ? "notification" : state;
   if (logicalState !== "notification") return {};
   let sawNotificationSession = false;
-  for (const [, session] of sessions) {
+  for (const [, session] of getDisplaySessions()) {
     if (!session || session.headless || session.state !== "notification") continue;
     sawNotificationSession = true;
     if (session.muteNotificationSound !== true) return {};
@@ -1081,6 +1143,11 @@ function emitSessionSnapshot(options = {}) {
   if (changed) {
     lastSessionSnapshotSignature = signature;
     broadcastSessionSnapshot(snapshot);
+  }
+  // Multi-pet: companions derive their display from this Map, so every
+  // session mutation is their cue to re-resolve (cheap; they dedupe).
+  if (typeof ctx.onSessionsChanged === "function") {
+    try { ctx.onSessionsChanged(); } catch {}
   }
   return { changed, snapshot };
 }
@@ -1816,7 +1883,7 @@ function promoteCompletion(sessionId, completionPayload = undefined) {
   // from ANOTHER session (e.g. an error) — it must win. We must NOT clear the
   // global pending queue here; pendingTimer/pendingState are process-wide, not
   // per-session, so clearing them would swallow another session's visual.
-  setState("attention");
+  withEventAgent(session.agentId, () => setState("attention"));
   return true;
 }
 
@@ -1980,6 +2047,9 @@ function updateSession(sessionId, state, event, opts = {}) {
 
   const sessionForPerm = sessions.get(sessionId);
   const permAgentId = resolveIncomingAgentId(sessionForPerm, agentId, agentIdDefaulted);
+  // Multi-pet: every one-shot raised below belongs to this event's agent
+  // (see routeForeignOneshot). Cleared in the finally block.
+  activeEventAgentId = permAgentId || null;
   const normalizedSessionAutomationIdentity = normalizeSessionAutomationIdentity(
     sessionAutomationIdentity
   );
@@ -2880,6 +2950,7 @@ function updateSession(sessionId, state, event, opts = {}) {
       // visible.
       console.warn("reconcileAckFlag threw:", err);
     }
+    activeEventAgentId = null;
     const recapSnapshot = emitSessionSnapshot().snapshot;
     if (recapPendingInput) recordAcceptedRecapEvent(recapPendingInput, recapSnapshot);
   }
@@ -3336,7 +3407,8 @@ function schedulePermissionSuspect(sessionId, permissionDetail = null) {
     // legacy suspect) makes the promoted cue name the tool that actually
     // blocks the terminal; null degrades to the generic copy.
     startKimiPermissionPoll(sessionId, permissionDetail, "heuristic");
-    setState("notification");
+    const suspectSession = sessions.get(sessionId);
+    withEventAgent(suspectSession && suspectSession.agentId, () => setState("notification"));
   }, delay);
   kimiPermissionSuspectTimers.set(sessionId, { timer, scheduledAt: Date.now() });
 }
@@ -3387,7 +3459,7 @@ function disposeKimiPermissionSession(sessionId) {
 }
 
 function resolveDisplayState() {
-  return resolveDisplayStateFromSessions(sessions, {
+  return resolveDisplayStateFromSessions(getDisplaySessions(), {
     statePriority: STATE_PRIORITY,
     permissionLocked: hasPermissionAnimationLock(),
     updateVisualState,
@@ -3416,7 +3488,7 @@ function getSvgOverride(state) {
     updateVisualSvgOverride,
     idleFollowSvg: SVG_IDLE_FOLLOW,
     idleDefaultVisual: typeof ctx.getIdleVisualChoice === "function" ? ctx.getIdleVisualChoice() : null,
-    sessions,
+    sessions: getDisplaySessions(),
     displayHintMap: DISPLAY_HINT_MAP,
     theme,
     stateSvgs: STATE_SVGS,
@@ -3541,7 +3613,7 @@ function cleanup() {
 }
 
 return {
-  setState, applyState, updateSession, recordRecapEventOnly, restoreSessionFromLease, resolveDisplayState, resolveVisualBinding, setUpdateVisualState,
+  setState, applyState, applyResolvedDisplayState, getDisplaySessions, updateSession, recordRecapEventOnly, restoreSessionFromLease, resolveDisplayState, resolveVisualBinding, setUpdateVisualState,
   shouldDropForDnd,
   enableDoNotDisturb, disableDoNotDisturb,
   startStaleCleanup, stopStaleCleanup, startWakePoll, stopWakePoll,

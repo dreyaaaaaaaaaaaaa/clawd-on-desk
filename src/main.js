@@ -185,6 +185,7 @@ const createThemeRuntime = require("./theme-runtime");
 const createAgentRuntimeMain = require("./agent-runtime-main");
 const createFloatingWindowRuntime = require("./floating-window-runtime");
 const createPetWindowRuntime = require("./pet-window-runtime");
+const { createCompanionPetManager } = require("./companion-pets");
 const { collectRequiredAssetFiles } = require("./theme-schema");
 const { describeGeometrySync } = require("./pet-accessory-state");
 const { createDisplayedVisualProjection } = require("./displayed-visual-projection");
@@ -471,6 +472,9 @@ let discordPresenceBridge = null;
 // what is actually on screen.
 let lastDiscordPresenceVisual = null;
 let displayedVisualProjection = null;
+// Multi-pet companions (src/companion-pets.js): created in createWindow()
+// after the main pet's windows exist; null until then / when disabled.
+let companionPets = null;
 let lastAppliedVisualGeneration = 0;
 let suppressTelegramMigrationReconcile = 0;
 let _remoteSshTransportCoordinator = null;
@@ -2129,6 +2133,9 @@ function repositionAnchoredFloatingSurfaces() {
 }
 
 function syncSessionHudVisibilityAndBubbles() {
+  // Runs on every pet visibility layer change (manual hide/show, fullscreen
+  // auto-hide): companions follow the main pet's effective visibility.
+  if (companionPets) companionPets.syncVisibility();
   return floatingWindowRuntime.syncSessionHudVisibilityAndBubbles();
 }
 
@@ -2308,6 +2315,13 @@ const _stateCtx = {
   getIdleVisualChoice,
   isAgentEnabled: (agentId) => _runtimeAgentGate.isAgentEnabled(agentId),
   hasAnyEnabledAgent: () => _runtimeAgentGate.hasAnyEnabledAgent(),
+  // Multi-pet: the main pet only displays agents without a companion pet;
+  // one-shots for companion agents are routed to that companion.
+  getDisplayAgentFilter: () => (companionPets ? companionPets.getPrimaryDisplayAgentFilter() : null),
+  onForeignOneshotState: (agentId, state, svgOverride, options) => (
+    companionPets ? companionPets.onForeignOneshotState(agentId, state, svgOverride, options) : false
+  ),
+  onSessionsChanged: () => { if (companionPets) companionPets.onSessionsChanged(); },
 };
 const _state = require("./state")(_stateCtx);
 displayedVisualProjection = createDisplayedVisualProjection({
@@ -2529,6 +2543,23 @@ function focusTerminalSession(session, sessionId, requestSource) {
     agentId: session.agentId,
     requestSource,
   });
+}
+
+// Companion pet body click: same rule as the main pet (1 focusable session →
+// focus its terminal, several → open the Dashboard), scoped to that agent.
+function focusCompanionAgentSessions(agentId) {
+  const focusable = getFocusableLocalHudSessionIds().filter((sid) => {
+    const session = sessions.get(sid);
+    return !!(session && session.agentId === agentId);
+  });
+  focusLog(`focus request source=companion-pet agent=${agentId} focusableCount=${focusable.length}`);
+  if (focusable.length > 1) {
+    showDashboard();
+    return;
+  }
+  if (focusable.length === 1) {
+    focusDashboardSession(focusable[0], { requestSource: "pet-body" });
+  }
 }
 
 function focusDashboardSession(sessionId, options = {}) {
@@ -4221,8 +4252,14 @@ const _menuCtx = {
   set contextMenuOwner(v) { contextMenuOwner = v; },
   get contextMenu() { return contextMenu; },
   set contextMenu(v) { contextMenu = v; },
-  enableDoNotDisturb: () => enableDoNotDisturb(),
-  disableDoNotDisturb: () => disableDoNotDisturb(),
+  enableDoNotDisturb: () => {
+    enableDoNotDisturb();
+    if (companionPets) companionPets.setDoNotDisturb(true);
+  },
+  disableDoNotDisturb: () => {
+    disableDoNotDisturb();
+    if (companionPets) companionPets.setDoNotDisturb(false);
+  },
   enterMiniViaMenu: () => {
     if (!disableMiniModeCached) enterMiniViaMenu();
   },
@@ -4948,6 +4985,14 @@ function createWindow() {
 
   registerPetInteractionIpc({
     ipcMain,
+    // Companion pets reuse the same preloads/channels: only accept events
+    // from the main pet's own render/hit window.
+    isOwnedSender: (event) => {
+      const sender = event && event.sender;
+      if (!sender) return false;
+      return (win && !win.isDestroyed() && sender === win.webContents)
+        || (hitWin && !hitWin.isDestroyed() && sender === hitWin.webContents);
+    },
     showContextMenu: (event) => showPetContextMenu(event),
     moveWindowForDrag: () => moveWindowForDrag(),
     setIdlePaused: (value) => { idlePaused = !!value; },
@@ -5020,6 +5065,56 @@ function createWindow() {
     ipcMain,
     updateBubble: _updateBubble,
   });
+
+  // ── Multi-pet companions (prefs.multiPet) ──
+  // Created after the main pet's windows + IPC gate exist. The manager reads
+  // prefs itself, spawns one companion per mapped agent and follows later
+  // settings changes (mapping / size / theme overrides).
+  companionPets = createCompanionPetManager({
+    BrowserWindow,
+    ipcMain,
+    screen,
+    Menu: require("electron").Menu,
+    isWin,
+    isMac,
+    isLinux,
+    linuxWindowType: LINUX_WINDOW_TYPE,
+    topmostLevel: WIN_TOPMOST_LEVEL,
+    themeLoader,
+    settingsController: _settingsController,
+    getPrimarySessions: () => sessions,
+    getDoNotDisturb: () => doNotDisturb,
+    getCurrentPixelSize: () => getEffectiveCurrentPixelSize(),
+    getPrimaryWorkAreaSafe: () => getPrimaryWorkAreaSafe(),
+    getNearestWorkArea: (cx, cy) => getNearestWorkArea(cx, cy),
+    getPrimaryPetBounds: () => getPetWindowBounds(),
+    isPetHidden: () => petWindowRuntime.isPetEffectivelyHidden(),
+    isQuitting: () => isQuitting,
+    flashTaskbar,
+    t: (key) => t(key),
+    debugLog: (msg) => sessionLog(msg),
+    logWarn: (...args) => console.warn(...args),
+    openSettings: (options) => settingsWindowRuntime.open(options),
+    focusAgentSessions: (agentId) => focusCompanionAgentSessions(agentId),
+    resolveAgentDisplayName: _resolveAgentDisplayName,
+    getCursorScreenPoint: () => screen.getCursorScreenPoint(),
+    preloadPath: path.join(__dirname, "preload.js"),
+    hitPreloadPath: path.join(__dirname, "preload-hit.js"),
+    indexHtmlPath: path.join(__dirname, "index.html"),
+    hitHtmlPath: path.join(__dirname, "hit.html"),
+    // The main pet's agent filter just changed (companions added/removed):
+    // re-settle it on what it is still responsible for.
+    onPrimaryFilterChanged: () => {
+      if (doNotDisturb || _mini.getMiniMode() || _mini.getMiniTransitioning()) return;
+      const resolved = resolveDisplayState();
+      setState(resolved, getSvgOverride(resolved));
+    },
+  });
+  try {
+    companionPets.start();
+  } catch (err) {
+    console.warn("Clawd: multi-pet startup failed:", err && err.message);
+  }
 
   initFocusHelper();
   startMainTick();
@@ -5717,6 +5812,7 @@ if (!gotTheLock) {
     if (_lanWss) _lanWss.cleanup();
     _updateBubble.cleanup();
     if (displayedVisualProjection) displayedVisualProjection.dispose();
+    if (companionPets) { try { companionPets.cleanup(); } catch {} }
     try { recapRuntime.dispose(); } catch {}
     _state.cleanup();
     _tick.cleanup();

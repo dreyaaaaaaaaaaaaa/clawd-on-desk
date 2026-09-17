@@ -719,6 +719,29 @@ const updateRegistry = {
   // Letting this field have an effect would double-activate when the UI
   // updates `theme` and `themeVariant` separately.
   themeVariant: requirePlainObject("themeVariant"),
+  // Multi-pet mapping (agentId -> themeId + companion positions). Runtime
+  // effects (spawn / retheme / dispose companions) subscribe in main.js.
+  multiPet(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return { status: "error", message: "multiPet must be a plain object" };
+    }
+    if (typeof value.enabled !== "boolean") {
+      return { status: "error", message: "multiPet.enabled must be a boolean" };
+    }
+    if (!value.pets || typeof value.pets !== "object" || Array.isArray(value.pets)) {
+      return { status: "error", message: "multiPet.pets must be a plain object" };
+    }
+    for (const [agentId, themeId] of Object.entries(value.pets)) {
+      if (typeof themeId !== "string" || !themeId) {
+        return { status: "error", message: `multiPet.pets.${agentId} must be a theme id` };
+      }
+    }
+    if (value.positions !== undefined
+      && (!value.positions || typeof value.positions !== "object" || Array.isArray(value.positions))) {
+      return { status: "error", message: "multiPet.positions must be a plain object" };
+    }
+    return { status: "ok" };
+  },
   // #509: per-theme default idle visual. Writes go through the `setIdleVisual`
   // command (which validates the file against the active theme); this entry
   // exists so applyCommand's commit re-validation accepts the key.

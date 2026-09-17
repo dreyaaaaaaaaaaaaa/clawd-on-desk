@@ -25,6 +25,22 @@
   <a href="https://github.com/hesreallyhim/awesome-claude-code"><img src="https://awesome.re/mentioned-badge-flat.svg" alt="Mentioned in Awesome Claude Code"></a>
 </p>
 
+> **Fork notice**
+>
+> This repository is a fork of [**Clawd on Desk**](https://github.com/rullerzhou-afk/clawd-on-desk) by
+> [rullerzhou-afk](https://github.com/rullerzhou-afk) and its contributors. All credit for the original
+> project belongs to them. The original code is licensed under the
+> [GNU AGPL-3.0](LICENSE); this fork keeps that license and its [NOTICE](NOTICE.md) unchanged.
+> Third-party assets (sounds, icons) remain under their original licenses as listed in `NOTICE.md`.
+>
+> **What this fork adds — Multi Pet mode:** one extra desktop pet per AI agent (e.g. a Cloudling for Codex
+> next to the main Clawd for Claude Code). Each companion pet has its own theme, state machine, window and
+> saved position, while sessions stay owned by the main pet. It is off by default and can be enabled in
+> *Settings → Theme → Multi Pet*. See [`docs/project/theme-state-ui.md`](docs/project/theme-state-ui.md#multi-pet)
+> and [`src/companion-pets.js`](src/companion-pets.js) for the design, and
+> [`test/multi-pet-routing.test.js`](test/multi-pet-routing.test.js) for the tests.
+> Everything else is unchanged from upstream.
+
 <p align="center">
   <img src="assets/hero.gif" alt="Clawd on Desk — a pixel desktop pet that reacts to your AI coding agent in real time. Animated demo: the crab cycles through sleeping, thinking while the model reads the codebase, typing as edit/bash tools run, grooving for one subagent, juggling when multiple subagents run, raising a permission bubble, and celebrating when 14 files / 312 tests are complete. Works with Claude Code, Codex, Cursor, Copilot, Gemini, Antigravity, Qwen, CodeWhale, Pi, OpenClaw and more.">
 </p>

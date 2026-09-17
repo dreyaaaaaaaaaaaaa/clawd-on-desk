@@ -89,6 +89,8 @@
       return;
     }
 
+    parent.appendChild(buildMultiPetSection());
+
     for (const section of getThemeSections(runtime.themeList)) {
       const sectionEl = document.createElement("section");
       sectionEl.className = "theme-section";
@@ -712,6 +714,182 @@
     row.appendChild(control);
     setVisual(visualEnabled);
     return row;
+  }
+
+  // ── Multi Pet (prefs.multiPet): one pet per agent ──
+  function getMultiPetPrefs() {
+    const raw = state.snapshot && state.snapshot.multiPet;
+    const enabled = !!(raw && raw.enabled === true);
+    const pets = raw && raw.pets && typeof raw.pets === "object" && !Array.isArray(raw.pets) ? raw.pets : {};
+    const positions = raw && raw.positions && typeof raw.positions === "object" ? raw.positions : {};
+    return { enabled, pets, positions };
+  }
+
+  function saveMultiPet(next) {
+    return Promise.resolve(window.settingsAPI.update("multiPet", next))
+      .then((result) => {
+        if (result && result.status === "ok") return true;
+        const message = (result && result.message) || "unknown error";
+        ops.showToast(t("toastSaveFailed") + message, { error: true });
+        return false;
+      })
+      .catch((err) => {
+        const message = (err && err.message) || "unknown error";
+        ops.showToast(t("toastSaveFailed") + message, { error: true });
+        return false;
+      });
+  }
+
+  function getMultiPetAgentRows() {
+    const agents = Array.isArray(runtime.multiPetAgents) ? runtime.multiPetAgents : null;
+    if (!agents) return null;
+    const flags = (state.snapshot && state.snapshot.agents) || {};
+    const { pets } = getMultiPetPrefs();
+    return agents.filter((agent) => {
+      if (!agent || typeof agent.id !== "string") return false;
+      const flag = flags[agent.id];
+      const enabled = !!(flag && flag.enabled === true);
+      return enabled || Object.prototype.hasOwnProperty.call(pets, agent.id);
+    });
+  }
+
+  function buildMultiPetSection() {
+    const sectionEl = document.createElement("section");
+    sectionEl.className = "theme-section multi-pet-section";
+    sectionEl.setAttribute("aria-labelledby", "theme-section-multi-pet");
+
+    const title = document.createElement("h2");
+    title.id = "theme-section-multi-pet";
+    title.className = "theme-section-title";
+    title.textContent = t("multiPetTitle");
+    sectionEl.appendChild(title);
+
+    const desc = document.createElement("p");
+    desc.className = "subtitle";
+    desc.textContent = t("multiPetDesc");
+    sectionEl.appendChild(desc);
+
+    const prefs = getMultiPetPrefs();
+    const activeTheme = (runtime.themeList || []).find((theme) => theme && theme.active) || null;
+    const mainPetLabel = t("multiPetMainPet").replace(
+      "{theme}",
+      activeTheme ? (localizeField(activeTheme.name) || activeTheme.id) : ((state.snapshot && state.snapshot.theme) || "")
+    );
+
+    // Enable switch
+    const enableRow = document.createElement("div");
+    enableRow.className = "row";
+    const enableText = document.createElement("div");
+    enableText.className = "row-text";
+    const enableLabel = document.createElement("span");
+    enableLabel.className = "row-label";
+    enableLabel.id = "multi-pet-enable-label";
+    enableLabel.textContent = t("multiPetEnable");
+    const enableDesc = document.createElement("span");
+    enableDesc.className = "row-desc";
+    enableDesc.id = "multi-pet-enable-desc";
+    enableDesc.textContent = t("multiPetEnableDesc");
+    enableText.appendChild(enableLabel);
+    enableText.appendChild(enableDesc);
+    const enableControl = document.createElement("div");
+    enableControl.className = "row-control";
+    let visualEnabled = prefs.enabled;
+    const switchControl = helpers.buildSwitch({
+      checked: visualEnabled,
+      ariaLabelledBy: enableLabel.id,
+      ariaDescribedBy: enableDesc.id,
+      className: "multi-pet-switch",
+    });
+    switchControl.setOnToggle(() => {
+      const current = getMultiPetPrefs();
+      visualEnabled = !visualEnabled;
+      switchControl.setState({ checked: visualEnabled, pending: true });
+      saveMultiPet({ enabled: visualEnabled, pets: { ...current.pets }, positions: { ...current.positions } })
+        .then((ok) => {
+          if (!ok) {
+            visualEnabled = getMultiPetPrefs().enabled;
+            switchControl.setState({ checked: visualEnabled });
+          }
+        })
+        .finally(() => {
+          if (document.body.contains(switchControl.element)) switchControl.setState({ pending: false });
+        });
+    });
+    enableControl.appendChild(switchControl.element);
+    enableRow.appendChild(enableText);
+    enableRow.appendChild(enableControl);
+    sectionEl.appendChild(enableRow);
+
+    // Per-agent rows
+    const rows = getMultiPetAgentRows();
+    if (rows === null) {
+      const loading = document.createElement("div");
+      loading.className = "placeholder-desc";
+      loading.textContent = t("multiPetAgentsLoading");
+      sectionEl.appendChild(loading);
+      if (!runtime.multiPetAgentsPending && window.settingsAPI && typeof window.settingsAPI.listAgents === "function") {
+        runtime.multiPetAgentsPending = true;
+        Promise.resolve(window.settingsAPI.listAgents())
+          .then((agents) => { runtime.multiPetAgents = Array.isArray(agents) ? agents : []; })
+          .catch(() => { runtime.multiPetAgents = []; })
+          .finally(() => {
+            runtime.multiPetAgentsPending = false;
+            if (state.activeTab === "theme") ops.requestRender({ content: true });
+          });
+      }
+      return sectionEl;
+    }
+    if (rows.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "placeholder-desc";
+      empty.textContent = t("multiPetAgentsEmpty");
+      sectionEl.appendChild(empty);
+      return sectionEl;
+    }
+
+    const themeOptions = [{ value: "", label: mainPetLabel }].concat(
+      (runtime.themeList || [])
+        .filter((theme) => theme && typeof theme.id === "string")
+        .map((theme) => ({ value: theme.id, label: localizeField(theme.name) || theme.id }))
+    );
+
+    for (const agent of rows) {
+      const row = document.createElement("div");
+      row.className = "row multi-pet-row";
+      const text = document.createElement("div");
+      text.className = "row-text";
+      const label = document.createElement("span");
+      label.className = "row-label";
+      label.textContent = agent.name || agent.id;
+      const rowDesc = document.createElement("span");
+      rowDesc.className = "row-desc";
+      rowDesc.textContent = t("multiPetRowDesc");
+      text.appendChild(label);
+      text.appendChild(rowDesc);
+      const control = document.createElement("div");
+      control.className = "row-control";
+      const committed = prefs.pets[agent.id] || "";
+      const picker = helpers.buildSettingsSelect({
+        value: themeOptions.some((option) => option.value === committed) ? committed : "",
+        options: themeOptions,
+        ariaLabel: t("multiPetTitle") + " - " + (agent.name || agent.id),
+        className: "multi-pet-select",
+        viewportPlacement: "down",
+        disabled: !prefs.enabled,
+        onChange(next) {
+          const current = getMultiPetPrefs();
+          const nextPets = { ...current.pets };
+          if (!next) delete nextPets[agent.id];
+          else nextPets[agent.id] = next;
+          return saveMultiPet({ enabled: current.enabled, pets: nextPets, positions: { ...current.positions } });
+        },
+      });
+      control.appendChild(picker.element);
+      row.appendChild(text);
+      row.appendChild(control);
+      sectionEl.appendChild(row);
+    }
+    return sectionEl;
   }
 
   function patchInPlace(changes) {

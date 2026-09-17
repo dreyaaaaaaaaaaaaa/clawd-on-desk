@@ -84,11 +84,22 @@ function registerPetInteractionIpc(options = {}) {
   const isMacPlatform = options.isMacPlatform != null
     ? !!options.isMacPlatform
     : process.platform === "darwin";
+  // Multi-pet: companion pets reuse the same preloads and therefore the same
+  // channel names. When provided, this predicate decides whether an event
+  // came from the main pet's own render/hit window; foreign senders are
+  // ignored here and handled by the companion runtime instead.
+  const isOwnedSender = typeof options.isOwnedSender === "function" ? options.isOwnedSender : null;
   const disposers = [];
 
   function on(channel, listener) {
-    ipcMain.on(channel, listener);
-    disposers.push(() => ipcMain.removeListener(channel, listener));
+    const gated = isOwnedSender
+      ? (event, ...args) => {
+        if (!isOwnedSender(event)) return undefined;
+        return listener(event, ...args);
+      }
+      : listener;
+    ipcMain.on(channel, gated);
+    disposers.push(() => ipcMain.removeListener(channel, gated));
   }
 
   on("show-context-menu", showContextMenu);
