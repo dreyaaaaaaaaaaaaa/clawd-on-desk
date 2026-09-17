@@ -714,7 +714,10 @@ function createCompanionPetManager(deps = {}) {
     });
     on("pet-visual-settled", (_event, payload) => { companion.projection.settle(payload); });
     on("pet-visual-ready", () => { syncHitWin(); });
-    on("focus-terminal", () => { focusAgentSessions(agentId); });
+    on("focus-terminal", () => {
+      debugLog(`companion-pet ${agentId} focus-terminal clicked`);
+      focusAgentSessions(agentId);
+    });
     on("show-context-menu", () => { showContextMenu(); });
     // Consumed so the primary's gate never sees them; companions have no mini
     // mode / low-power mode / accessories.

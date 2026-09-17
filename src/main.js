@@ -2548,21 +2548,26 @@ function focusTerminalSession(session, sessionId, requestSource) {
 // Companion pet body click: same rule as the main pet (1 focusable session →
 // focus its terminal, several → open the Dashboard), scoped to that agent.
 function focusCompanionAgentSessions(agentId) {
+  console.log(`[DEBUG] focusCompanionAgentSessions called for agent=${agentId}`);
   const focusable = getFocusableLocalHudSessionIds().filter((sid) => {
     const session = sessions.get(sid);
     return !!(session && session.agentId === agentId);
   });
   focusLog(`focus request source=companion-pet agent=${agentId} focusableCount=${focusable.length}`);
+  console.log(`[DEBUG] focusable sessions for ${agentId}:`, focusable.length);
   if (focusable.length > 1) {
+    console.log(`[DEBUG] showing dashboard (${focusable.length} sessions)`);
     showDashboard();
     return;
   }
   if (focusable.length === 1) {
+    console.log(`[DEBUG] focusing session ${focusable[0]}`);
     focusDashboardSession(focusable[0], { requestSource: "pet-body" });
     return;
   }
   // No focusable sessions for this agent: open dashboard anyway so the user
   // can see usage stats and all sessions across agents
+  console.log(`[DEBUG] no focusable sessions, showing dashboard`);
   showDashboard();
 }
 
