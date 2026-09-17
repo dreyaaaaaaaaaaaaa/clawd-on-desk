@@ -180,6 +180,7 @@ function createCompanionPetManager(deps = {}) {
 
   // ── Companion factory ──
   function createCompanion(agentId, themeId, index) {
+    debugLog(`[COMPANION] Creating companion for agent=${agentId} theme=${themeId}`);
     let loaded;
     try {
       loaded = loadCompanionTheme(themeId);
@@ -523,6 +524,7 @@ function createCompanionPetManager(deps = {}) {
       },
     });
     companion.hitWin = hitWin;
+    debugLog(`[COMPANION] Hit window created for ${agentId}`);
     hitWin.setShape([{ x: 0, y: 0, width: 8, height: 8 }]);
     hitWin.setIgnoreMouseEvents(false);
     if (isMac) hitWin.setFocusable(false);
