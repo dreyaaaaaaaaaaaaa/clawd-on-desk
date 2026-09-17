@@ -2559,7 +2559,11 @@ function focusCompanionAgentSessions(agentId) {
   }
   if (focusable.length === 1) {
     focusDashboardSession(focusable[0], { requestSource: "pet-body" });
+    return;
   }
+  // No focusable sessions for this agent: open dashboard anyway so the user
+  // can see usage stats and all sessions across agents
+  showDashboard();
 }
 
 function focusDashboardSession(sessionId, options = {}) {
