@@ -725,3 +725,71 @@ describe("session HUD v5 three-state runtime contracts (source-level)", () => {
     );
   });
 });
+
+describe("session HUD multi-pet scope (scopeSnapshotToAgents)", () => {
+  const { scopeSnapshotToAgents } = sessionHud.__test;
+
+  function mkQuotaSource(host, providers) {
+    const source = { sourceKey: host, host };
+    for (const key of providers) {
+      source[key] = { group: { [key.replace("Quota", "FiveHour")]: { usedPercent: 10 } }, updatedAt: 1, lastSeenAt: 1 };
+    }
+    return source;
+  }
+
+  const full = {
+    sessions: [
+      mkSession("c1", { agentId: "claude-code", displayTitle: "claude one" }),
+      mkSession("x1", { agentId: "codex", displayTitle: "codex one" }),
+      mkSession("c2", { agentId: "claude-code", displayTitle: "claude two", state: "idle" }),
+    ],
+    orderedIds: ["x1", "c1", "c2"],
+    menuOrderedIds: ["c1", "x1", "c2"],
+    groups: [{ host: "", ids: ["x1", "c1", "c2"], displayHost: "" }],
+    accountQuota: [
+      mkQuotaSource("local", ["claudeQuota", "codexQuota"]),
+      mkQuotaSource("remote", ["codexQuota"]),
+    ],
+    hudTotalNonIdle: 3,
+    hudLastSessionId: "x1",
+    hudLastTitle: "codex one",
+    hudShowQuota: true,
+  };
+
+  it("keeps only the filtered agent's sessions, ordering and quota providers", () => {
+    const codexOnly = scopeSnapshotToAgents(full, (id) => id === "codex");
+    assert.deepEqual(codexOnly.sessions.map((s) => s.id), ["x1"]);
+    assert.deepEqual(codexOnly.orderedIds, ["x1"]);
+    assert.deepEqual(codexOnly.menuOrderedIds, ["x1"]);
+    assert.deepEqual(codexOnly.groups, [{ host: "", ids: ["x1"], displayHost: "" }]);
+    assert.equal(codexOnly.accountQuota.length, 2);
+    for (const source of codexOnly.accountQuota) {
+      assert.ok(source.codexQuota, "codex quota kept");
+      assert.equal(source.claudeQuota, undefined, "claude quota dropped");
+      assert.equal(source.host, source.sourceKey, "non-provider fields kept");
+    }
+    assert.equal(codexOnly.hudTotalNonIdle, 1);
+    assert.equal(codexOnly.hudLastSessionId, "x1");
+    assert.equal(codexOnly.hudLastTitle, "codex one");
+    assert.equal(codexOnly.hudShowQuota, true, "other fields pass through");
+  });
+
+  it("main pet view = everything without a companion; drops quota sources left empty", () => {
+    const mainView = scopeSnapshotToAgents(full, (id) => id !== "codex");
+    assert.deepEqual(mainView.sessions.map((s) => s.id), ["c1", "c2"]);
+    assert.deepEqual(mainView.orderedIds, ["c1", "c2"]);
+    // "remote" only reported Codex quota → no coin left for the main pet.
+    assert.deepEqual(mainView.accountQuota.map((s) => s.host), ["local"]);
+    assert.ok(mainView.accountQuota[0].claudeQuota);
+    assert.equal(mainView.accountQuota[0].codexQuota, undefined);
+    assert.equal(countQuotaCoins(mainView, true, []), 1);
+    assert.equal(countQuotaCoins(scopeSnapshotToAgents(full, (id) => id === "codex"), true, []), 2);
+  });
+
+  it("does not mutate the input and is a no-op without a filter", () => {
+    const before = JSON.stringify(full);
+    scopeSnapshotToAgents(full, (id) => id === "codex");
+    assert.equal(JSON.stringify(full), before);
+    assert.strictEqual(scopeSnapshotToAgents(full, null), full);
+  });
+});

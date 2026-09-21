@@ -412,6 +412,9 @@ describe("multi-pet: companion pet body click", () => {
     assert.ok(typeof anchor.getSessionHudAnchorRect === "function");
     // The anchor reports the companion's own window, not the main pet's.
     assert.deepEqual(anchor.getPetWindowBounds(), companion.win.getBounds());
+    // ...and scopes the HUD to this agent only.
+    assert.equal(anchor.agentFilter("codex"), true);
+    assert.equal(anchor.agentFilter("claude-code"), false);
   });
 
   it("ignores reveal-session-hud from a window it does not own", () => {

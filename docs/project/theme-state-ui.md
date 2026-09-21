@@ -36,7 +36,8 @@ Windows 的 hit window 在原生 activation controller 可用时按前台全屏�
 - 会话真相仍只有主 `state.js` 的 `sessions` Map：companion 通过 `ctx.getExternalSessions()` + `ctx.getDisplayAgentFilter()` 读取过滤视图（`getDisplaySessions()`），主桌宠用同一机制排除 companion agent
 - 一次性视觉（attention / error / notification / sweeping / carrying）无法从 Map 推导：`updateSession` / `promoteCompletion` 用 `activeEventAgentId` 标记事件归属，`setState` 通过 `routeForeignOneshot` 把外来 agent 的 one-shot 交给 `ctx.onForeignOneshotState`，自己只重新 settle；`emitSessionSnapshot` 触发 `ctx.onSessionsChanged` 让 companion 重新解析
 - `pet-interaction-ipc.js` 的 `isOwnedSender` 门：companion 复用同一套 preload / channel，主桌宠只接受自己窗口发来的 drag / reaction IPC，companion 在 `companion-pets.js` 内注册自己的 sender-gated listener
-- companion 不参与 mini mode、free roam、HUD / 气泡锚定、配饰 / tint、viewport 虚拟化；位置写入 `multiPet.positions[agentId]`，默认排在主桌宠旁边；隐藏 / DND / size / themeOverrides 变更由 main.js 转发
+- companion 不参与 mini mode、free roam、气泡锚定、配饰 / tint、viewport 虚拟化；位置写入 `multiPet.positions[agentId]`，默认排在主桌宠旁边；隐藏 / DND / size / themeOverrides 变更由 main.js 转发
+- Session HUD 仍是唯一共享实例：点击任一桌宠发 `pet-interaction:reveal-session-hud`，`session-hud.js` 的 `revealFromPet(anchor)` 接收被点桌宠的 `{ getPetWindowBounds, getHitRectScreen, getSessionHudAnchorRect, agentFilter }`——HUD / 配额环贴着该桌宠定位，auto-hide 热区跟随它，且 `scopeSnapshotToAgents` 只保留该桌宠负责的 agent 的会话与配额（主桌宠 = 无 companion 的 agent，companion = 自己的 agent）；reveal 结束即清除 anchor，单桌宠模式与 pinned 模式不受影响
 - Settings → Theme 的「Multi Pet」区块暴露开关与每个已启用 agent 的下拉（"Main pet" 或某个主题）
 
 ## Theme System

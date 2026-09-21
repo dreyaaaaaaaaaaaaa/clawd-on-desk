@@ -605,12 +605,14 @@ function createCompanionPetManager(deps = {}) {
     }
     companion.showWindows = showWindows;
     companion.hideWindows = hideWindows;
-    // Session HUD anchor: the shared HUD positions itself beside this pet (and
-    // keeps its auto-hide hot zone here) while revealed from a click on it.
+    // Session HUD anchor: the shared HUD positions itself beside this pet,
+    // keeps its auto-hide hot zone here and shows only this agent's sessions
+    // and quota while revealed from a click on it.
     companion.hudAnchor = {
       getPetWindowBounds,
       getHitRectScreen: (bounds) => companion.geometry.getHitRectScreen(bounds),
       getSessionHudAnchorRect: (bounds) => companion.geometry.getSessionHudAnchorRect(bounds),
+      agentFilter: (id) => id === agentId,
     };
 
     // ── Drag / reactions / clicks (IPC from this companion's windows only) ──

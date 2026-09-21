@@ -5047,9 +5047,16 @@ function createWindow() {
     showDashboard: () => showDashboard(),
     focusSession: (sessionId, options) => focusDashboardSession(sessionId, options),
     revealSessionHud: () => {
-      if (_sessionHud && typeof _sessionHud.revealFromPet === "function") {
-        _sessionHud.revealFromPet();
-      }
+      if (!_sessionHud || typeof _sessionHud.revealFromPet !== "function") return;
+      // Multi-pet: the main pet's HUD covers only the agents it displays
+      // (everything without a companion). Single-pet mode stays unscoped.
+      const agentFilter = companionPets ? companionPets.getPrimaryDisplayAgentFilter() : null;
+      _sessionHud.revealFromPet(agentFilter ? {
+        getPetWindowBounds: () => getPetWindowBounds(),
+        getHitRectScreen: (bounds) => getHitRectScreen(bounds),
+        getSessionHudAnchorRect: (bounds) => getSessionHudAnchorRect(bounds),
+        agentFilter,
+      } : null);
     },
     statPath: (p) => fs.promises.stat(p),
     openTerminalAt: (dir) => openTerminalAt(dir),

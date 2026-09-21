@@ -61,6 +61,62 @@ function snapshotHasVisibleSessions(snapshot) {
   return sessions.some(isHudSession);
 }
 
+// Quota-ring providers owned by each agent (mirrors quotaAgentIcons in
+// state-session-snapshot.js). Used to scope the ring to the clicked pet.
+const QUOTA_PROVIDERS_BY_AGENT = {
+  "antigravity-cli": ["antigravityQuota"],
+  "claude-code": ["claudeQuota"],
+  codex: ["codexQuota", "codexSparkQuota"],
+  "kimi-cli": ["kimiQuota"],
+};
+const ALL_QUOTA_PROVIDER_KEYS = new Set(Object.values(QUOTA_PROVIDERS_BY_AGENT).flat());
+
+// Multi-pet: a snapshot restricted to the agents `agentFilter(agentId)`
+// accepts — session rows, their ordering/groups and the quota-ring sources.
+// Pure and non-mutating: returns a shallow copy with the filtered arrays.
+function scopeSnapshotToAgents(snapshot, agentFilter) {
+  if (!snapshot || typeof agentFilter !== "function") return snapshot;
+  const sessions = (Array.isArray(snapshot.sessions) ? snapshot.sessions : [])
+    .filter((session) => session && agentFilter(session.agentId));
+  const keep = new Set(sessions.map((session) => session.id));
+  const keepIds = (ids) => (Array.isArray(ids) ? ids.filter((id) => keep.has(id)) : ids);
+  const allowedProviders = new Set();
+  for (const [agentId, keys] of Object.entries(QUOTA_PROVIDERS_BY_AGENT)) {
+    if (agentFilter(agentId)) for (const key of keys) allowedProviders.add(key);
+  }
+  const accountQuota = (Array.isArray(snapshot.accountQuota) ? snapshot.accountQuota : [])
+    .map((source) => {
+      if (!source || typeof source !== "object") return null;
+      const out = {};
+      let hasProvider = false;
+      for (const [key, value] of Object.entries(source)) {
+        if (ALL_QUOTA_PROVIDER_KEYS.has(key)) {
+          if (!allowedProviders.has(key)) continue;
+          hasProvider = true;
+        }
+        out[key] = value;
+      }
+      return hasProvider ? out : null;
+    })
+    .filter(Boolean);
+  const hudEntries = sessions.filter(isHudSession);
+  return {
+    ...snapshot,
+    sessions,
+    orderedIds: keepIds(snapshot.orderedIds),
+    menuOrderedIds: keepIds(snapshot.menuOrderedIds),
+    groups: Array.isArray(snapshot.groups)
+      ? snapshot.groups
+        .map((group) => (group ? { ...group, ids: keepIds(group.ids) } : group))
+        .filter((group) => group && Array.isArray(group.ids) && group.ids.length > 0)
+      : snapshot.groups,
+    accountQuota,
+    hudTotalNonIdle: hudEntries.length,
+    hudLastSessionId: hudEntries.length ? hudEntries[0].id : null,
+    hudLastTitle: hudEntries.length ? hudEntries[0].displayTitle : null,
+  };
+}
+
 function evaluateBaseEligible({
   snapshot,
   sessionHudEnabled,
@@ -348,6 +404,15 @@ module.exports = function initSessionHud(ctx) {
       : ctx.getSessionHudAnchorRect;
     return typeof fn === "function" ? fn(petBounds) : null;
   }
+  // Multi-pet: the revealed HUD shows only what the clicked pet is responsible
+  // for. `latestSnapshot` always keeps the full snapshot; every read that
+  // decides visibility, geometry or renderer content goes through this view.
+  function viewSnapshot(snapshot = latestSnapshot) {
+    const filter = revealAnchor && typeof revealAnchor.agentFilter === "function"
+      ? revealAnchor.agentFilter
+      : null;
+    return filter ? scopeSnapshotToAgents(snapshot, filter) : snapshot;
+  }
   let visibleHoldUntil = 0;
 
   function getCurrentSnapshot() {
@@ -364,7 +429,7 @@ module.exports = function initSessionHud(ctx) {
     return typeof ctx.getMiniTransitioning === "function" && ctx.getMiniTransitioning();
   }
 
-  function baseEligible(snapshot = latestSnapshot) {
+  function baseEligible(snapshot = viewSnapshot()) {
     return evaluateBaseEligible({
       snapshot,
       sessionHudEnabled: ctx.sessionHudEnabled,
@@ -376,14 +441,14 @@ module.exports = function initSessionHud(ctx) {
     });
   }
 
-  function shouldShow(snapshot = latestSnapshot) {
+  function shouldShow(snapshot = viewSnapshot()) {
     if (!baseEligible(snapshot)) return false;
     if (ctx.sessionHudPinned === true) return true;
     return clickRevealed;
   }
 
   function isAutoHidePollingNeeded() {
-    if (!baseEligible(latestSnapshot)) return false;
+    if (!baseEligible()) return false;
     if (ctx.sessionHudPinned === true) return false;
     return clickRevealed === true;
   }
@@ -468,11 +533,12 @@ module.exports = function initSessionHud(ctx) {
       cursor = null;
     }
     let inHotZone = false;
+    const view = viewSnapshot();
     if (cursor) {
       // Single scale resolve for the whole evaluation: expected bounds and
       // pad must describe the same (scaled) HUD the user actually sees.
       const scale = getTextScale();
-      const expected = computeExpectedHudContentBounds(latestSnapshot, scale);
+      const expected = computeExpectedHudContentBounds(view, scale);
       const hotZone = computeAutoHideHotZone({
         petHitRect: expected && expected.hitRect,
         expectedHudContentBounds: expected && expected.contentBounds,
@@ -483,7 +549,7 @@ module.exports = function initSessionHud(ctx) {
     }
     const now = Date.now();
     const result = evaluateShouldShow({
-      snapshot: latestSnapshot,
+      snapshot: view,
       sessionHudEnabled: ctx.sessionHudEnabled,
       sessionHudPinned: ctx.sessionHudPinned,
       clickRevealed,
@@ -586,20 +652,28 @@ module.exports = function initSessionHud(ctx) {
     }
   }
 
-  // Public API: user clicked the pet to reveal HUD. `anchor` (optional) is a
-  // companion pet's { getPetWindowBounds, getHitRectScreen,
-  // getSessionHudAnchorRect }: the HUD then sits beside that pet and its
-  // hot zone follows it; omitted = main pet.
+  // Public API: user clicked the pet to reveal HUD. `anchor` (optional) is the
+  // clicked pet's { getPetWindowBounds, getHitRectScreen,
+  // getSessionHudAnchorRect, agentFilter? }: the HUD then sits beside that
+  // pet, its hot zone follows it, and with an agentFilter it shows only that
+  // pet's agents (sessions + quota). Omitted = main pet, unscoped.
   function revealFromPet(anchor = null) {
     // Quota can expire while both overlay windows are hidden and no session
     // event arrives. Re-read before deciding eligibility so a stale cached
     // snapshot cannot resurrect a dead Orbit coin.
     latestSnapshot = getCurrentSnapshot();
-    if (!baseEligible(latestSnapshot)) return;
     if (ctx.sessionHudPinned === true) return;     // pinned already always-show
     const nextAnchor = anchor && typeof anchor.getPetWindowBounds === "function" ? anchor : null;
-    const anchorChanged = nextAnchor !== revealAnchor;
+    const prevAnchor = revealAnchor;
+    const anchorChanged = nextAnchor !== prevAnchor;
     revealAnchor = nextAnchor;
+    // Eligibility is judged on what THIS pet would show: a pet whose agents
+    // have no sessions and no quota reveals nothing (and leaves any current
+    // reveal untouched).
+    if (!baseEligible()) {
+      revealAnchor = prevAnchor;
+      return;
+    }
     if (clickRevealed) {
       // Already revealed — refresh grace as a click tolerance; a click on a
       // different pet moves the HUD over to it.
@@ -936,8 +1010,11 @@ module.exports = function initSessionHud(ctx) {
     showQuotaRing(rwin);
   }
 
-  function syncSessionHud(snapshot = latestSnapshot || getCurrentSnapshot(), options = {}) {
-    latestSnapshot = snapshot;
+  function syncSessionHud(fullSnapshot = latestSnapshot || getCurrentSnapshot(), options = {}) {
+    latestSnapshot = fullSnapshot;
+    // Everything below sees the clicked pet's view of the snapshot (multi-pet);
+    // without a scoped reveal this is the full snapshot itself.
+    const snapshot = viewSnapshot(fullSnapshot);
     // Defend against stale reveal: if base eligibility dropped (last session
     // ended AND quota went away), clear any leftover clickRevealed so a future
     // new session does not pop the UI without a fresh user click.
@@ -982,7 +1059,7 @@ module.exports = function initSessionHud(ctx) {
   }
 
   function repositionQuotaRing() {
-    const snapshot = latestSnapshot || getCurrentSnapshot();
+    const snapshot = viewSnapshot(latestSnapshot || getCurrentSnapshot());
     const scale = getTextScale();
     const hudComputed = shouldShow(snapshot)
       && ctx.sessionHudEnabled !== false
@@ -1046,6 +1123,7 @@ module.exports = function initSessionHud(ctx) {
 };
 
 module.exports.__test = {
+  scopeSnapshotToAgents,
   computeSessionHudBounds,
   computeHudLayout,
   getHudMaxExpandedRows,
